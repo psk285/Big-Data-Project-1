@@ -1,0 +1,93 @@
+﻿---
+title: "BigDataProject"
+author: "Pratik Kamath"
+date: "10/6/2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(rgdal)
+library(ggplot2)
+library(ggmap)
+library("plyr")
+library(sp)
+library(rgeos)
+library(maptools)
+library(leaflet)
+library(dplyr)
+library(magrittr)
+library(readr)
+library(lubridate)
+library(RColorBrewer)
+library(classInt)
+library(raster)
+library(gplots)
+
+
+# Here I have put the required Chicago crime csv file in the the directory of your choice and made it my working directory and read it.
+filePathDirectory = "sftp://psk285@12.42.205.8/home/2016/9223/psk285/Individual%20Project%201/Chicago"
+setwd(filePathDirectory)
+intensityDataChicago <- read.csv("Crimes_-_2001_to_present.csv", header = T, sep=",")
+intensityDF <- as.data.frame(intensityDataChicago)
+head <- head(intensityDF, 10000)
+# Here I have performed data cleaning operations by filtering out 
+intensityDF <- filter(intensityDF, intensityDF$Longitude != "NA")
+intensityDF <- filter(intensityDF, intensityDF$Latitude != "NA")
+coords <- SpatialPoints(intensityDF[,c("Longitude","Latitude")])
+crime_spatial_df <- SpatialPointsDataFrame(coords, intensityDF)
+proj4string(crime_spatial_df) <- CRS("+proj=longlat +datum=WGS84")
+
+#Here I have read in the shapefiles and plotted a dot distribution graph.
+wmap <- readOGR(dsn = "sftp://psk285@12.42.205.8/home/2016/9223/psk285/Individual%20Project%201/Chicago/Boundaries - Wards (2015-)", layer = "geo_export_daad80fa-f92a-44b0-b4cb-54fc67634e35")
+plot(wmap)
+points(crime_spatial_df, col = "SteelBlue", pch = 21, cex = .5)
+
+#ggplot2
+crime_df <- data.frame(crime_spatial_df)
+wmap_df <- fortify(wmap)
+p <- ggplot() + 
+  geom_polygon(aes(x=long,y=lat,group = group), data = wmap_df,
+               colour = "black", fill = NA) +
+  geom_point(data = crime_df, aes(x=Longitude,y=Latitude), color = "red") + coord_equal() +
+  labs(title = "Locations of Offensive crimes in Chicago, Illinois") +
+  xlab("Longitude") +
+  ylab("Latitude")
+p
+
+# Here I have plotted a Heat Map for Chicago. It's pretty much out there but it's just the start.
+chicagoMap = map = get_map(location = "chicago" , zoom = 11, maptype = "terrain")
+
+f <- ggmap(chicagoMap)  +
+stat_density2d(data=crime_df, aes(x=Longitude, y=Latitude,color=..density..
+,size=ifelse(..density..<=1,0,..density..), alpha=..density..)
+,geom="tile",contour=F) + scale_color_continuous(low="red", high="blue", guide = "none") +scale_size_continuous(range = c(0, 0.2), guide = "none") + scale_alpha(range =c(0, 0.65), guide="none") + ggtitle("Chicago Crime") + theme(plot.title = element_text(family="Trebuchet MS", size=36, face="bold", hjust=0, color="#777777"))
+
+f
+
+# Now it's time to do something very cool. I will be doing an analysis in which I will show the wards on the map so that it is easy to understand from the heatmap as to what is the ward number with highest crimes.
+View(head)
+wmap@data$id <- rownames(wmap@data)
+wmap.df <- fortify(wmap)
+wmap.df <- join(wmap.df, wmap@data, by="id")
+wmap.df <- merge(wmap.df, head, by.x="ward",by.y="Ward" ,all.x=T, a..ly=F)
+precinctCentres <- data.frame(precinct= numeric(0), lat_centre = numeric(0), long_centre = numeric(0))
+
+for(k in 1:123) {
+  
+  temp_lat2 = mean(wmap.df$lat[wmap.df$ward == k])
+  temp_lon2 = mean(wmap.df$long[wmap.df$ward == k])
+
+  newrow1 <- data.frame(precinct = k, lat_centre = temp_lat2, long_centre = temp_lon2)
+  
+  precinctCentres = rbind(precinctCentres, newrow1)
+}
+
+chicagoMap = map = get_map(location = "chicago" , zoom = 11, maptype = "terrain")
+ggmap(chicagoMap) + 
+geom_polygon(aes(x=long,y=lat,group = group), data = wmap.df, colour = "black", fill = NA) + geom_point(data = crime_df, aes(x=Longitude,y=Latitude), color = "red") + scale_fill_gradient(low = "green", high = "red") 
+
+ggmap(chicagoMap) +
+stat_density2d(data=crime_df, aes(x=Longitude, y=Latitude,color=..density..
+,size=ifelse(..density..<=1,0,..density..), alpha=..density..)
+,geom="tile",contour=F) + scale_color_continuous(low="red", high="blue", guide = "none") +scale_size_continuous(range = c(0, 0.2), guide = "none") + scale_alpha(range =c(0, 0.65), guide="none") + ggtitle("Chicago Crime") + theme(plot.title = element_text(family="Trebuchet MS", size=36, face="bold", hjust=0, color="#777777")) + scale_fill_gradient(low = "green", high = "red") + geom_text(aes(x=long_centre,y=lat_centre,label=precinct), data = precinctCentres, size=4)
+
